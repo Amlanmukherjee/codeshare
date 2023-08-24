@@ -1,0 +1,79 @@
+CREATE OR REPLACE PROCEDURE `gcp-ee-wda-uat.gcp_wda_dw.usp_dw_faap`()
+BEGIN
+  DECLARE PositionIdentifierNumber STRING;
+  DECLARE Sup_PositionIdentifierNumber STRING;
+  DECLARE Faap_PlanName STRING;
+  DECLARE Initial_PositionIdentifierNumber STRING;
+
+  FOR Position IN (SELECT DISTINCT CASE 
+                  WHEN INSTR(PositionIdentifierNumber,'_') > 0
+                    THEN SUBSTR(PositionIdentifierNumber,1,INSTR(PositionIdentifierNumber,'_')-1)
+                  WHEN INSTR(PositionIdentifierNumber,' ') > 0
+                    THEN SUBSTR(PositionIdentifierNumber,1,INSTR(PositionIdentifierNumber,' ')-1)
+                  ELSE PositionIdentifierNumber
+                END AS PositionIdentifierNumber
+              FROM gcp-ee-wda-dev.gcp_wda_work.stg_TBPREQUISITION_STG)
+  DO
+  SET Initial_PositionIdentifierNumber = CAST(Position.PositionIdentifierNumber AS STRING);
+  label_1:LOOP
+    set (PositionIdentifierNumber,Sup_PositionIdentifierNumber,Faap_PlanName)= (SELECT AS STRUCT Emp_PositionIdentifierNumber, Sup_PositionIdentifierNumber,Faap_PlanName FROM 
+    (SELECT DISTINCT 
+        CASE 
+          WHEN INSTR(POS.PositionIdentifierNumber,'_') > 0
+            THEN SUBSTR(POS.PositionIdentifierNumber,1,INSTR(POS.PositionIdentifierNumber,'_')-1)
+          WHEN INSTR(POS.PositionIdentifierNumber,' ') > 0
+            THEN SUBSTR(POS.PositionIdentifierNumber,1,INSTR(POS.PositionIdentifierNumber,' ')-1)
+          ELSE POS.PositionIdentifierNumber
+        END AS Emp_PositionIdentifierNumber
+        ,CASE 
+            WHEN INSTR(POS1.PositionIdentifierNumber,'_') > 0
+              THEN SUBSTR(POS1.PositionIdentifierNumber,1,INSTR(POS1.PositionIdentifierNumber,'_')-1)
+            WHEN INSTR(POS1.PositionIdentifierNumber,' ') > 0
+              THEN SUBSTR(POS1.PositionIdentifierNumber,1,INSTR(POS1.PositionIdentifierNumber,' ')-1)
+            ELSE POS1.PositionIdentifierNumber
+        END AS Sup_PositionIdentifierNumber
+        ,FAAP.PlanName AS Faap_PlanName
+        FROM  gcp_wda_dw.Position AS POS
+        JOIN gcp_wda_dw.Employee_Profile as EMP
+          ON POS.Employee_Position.EmployeeSystemNumber = EMP.EmployeeSystemNumber
+          AND DATE ( POS.PositionAsOfDate ) = DATE ( EMP.EmployeeProfileAsOfDate )
+        JOIN gcp_wda_dw.Position AS POS1 
+          ON POS1.Employee_Position.EmployeeSystemNumber=POS.Employee_Position.SupervisorEmployeeSystemNumber 
+          AND DATE ( POS1.PositionAsOfDate ) = DATE ( POS.PositionAsOfDate )
+        JOIN gcp-ee-wda-dev.gcp_wda_work.FAAP_Hierarchy FAAP
+            ON CASE 
+            WHEN INSTR(FAAP.PositionCode,'_') > 0
+              THEN SUBSTR(FAAP.PositionCode,1,INSTR(FAAP.PositionCode,'_')-1)
+            WHEN INSTR(FAAP.PositionCode,' ') > 0
+              THEN SUBSTR(FAAP.PositionCode,1,INSTR(FAAP.PositionCode,' ')-1)
+            ELSE FAAP.PositionCode
+            END = CASE 
+            WHEN INSTR(POS1.PositionIdentifierNumber,'_') > 0
+              THEN SUBSTR(POS1.PositionIdentifierNumber,1,INSTR(POS1.PositionIdentifierNumber,'_')-1)
+            WHEN INSTR(POS1.PositionIdentifierNumber,' ') > 0
+              THEN SUBSTR(POS1.PositionIdentifierNumber,1,INSTR(POS1.PositionIdentifierNumber,' ')-1)
+            ELSE POS1.PositionIdentifierNumber
+            END
+        WHERE EMP.EmployeeProfileAsOfDate = (select max(EmployeeProfileAsOfDate) from  gcp_wda_dw.Employee_Profile) and 
+          POS.bq_logical_delete_indicator = 0 and EMP.bq_logical_delete_indicator = 0
+          AND POS.bq_logical_delete_indicator = 0
+          AND POS.PositionAsOfDate = (select max(PositionAsOfDate) from  gcp_wda_dw.Position)
+          AND POS1.PositionAsOfDate = (select max(PositionAsOfDate) from  gcp_wda_dw.Position)
+          AND LOWER(EMP.EmployeeStatusDescriptionText) IN ('active')
+          AND CASE 
+                WHEN INSTR(POS.PositionIdentifierNumber,'_') > 0
+                  THEN SUBSTR(POS.PositionIdentifierNumber,1,INSTR(POS.PositionIdentifierNumber,'_')-1)
+                WHEN INSTR(POS.PositionIdentifierNumber,' ') > 0
+                  THEN SUBSTR(POS.PositionIdentifierNumber,1,INSTR(POS.PositionIdentifierNumber,' ')-1)
+                ELSE POS.PositionIdentifierNumber
+              END = CAST(Position.PositionIdentifierNumber AS STRING)) A);
+          IF Faap_PlanName IS NULL 
+            THEN SET Position = CAST(Sup_PositionIdentifierNumber AS STRING);
+          ELSE 
+            BREAK label_1;
+          END IF;
+        END LOOP label_1;    
+
+  END FOR;
+  
+END;
